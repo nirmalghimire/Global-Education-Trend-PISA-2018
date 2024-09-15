@@ -1,0 +1,520 @@
+---
+title: <center><h1>Student Data Modeling for Top 5 and Bottom 5 Countries</h1></center>
+author: 
+- name: "Nirmal Ghimire, Ph.D."
+  url: https://www.linkedin.com/in/nirmal-ghimire-5b96a034/
+  affiliation: Watson College of Education, University of North Carolina Wilmington
+  affiliation_url: https://www.uncw.edu/ed/
+  orcid_id: 0000-0002-2032-1624
+date: "`r Sys.Date()`"
+output: distill::distill_article
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      comment = NA,
+                      warning = FALSE,
+                      message = FALSE,
+                      tidy = 'styler',
+                      error = FALSE, 
+                      highlight = TRUE, 
+                     prompt = FALSE)
+library(tidyverse)
+library(haven)
+library(dplyr)
+library(data.table)
+library(ggplot2)
+library(reshape2)
+library(naniar)
+library(tidyr)
+library(psych)
+```
+
+## A. Data Structure and Diemnsions
+
+```{r load_data, echo=FALSE}
+#Loading required data sets
+# Load the saved student_ten data
+load("student_ten.RData")
+
+# Subset the data to include only the specified variables
+student_ten_subset <- student_ten %>%
+  select(CNTRYID, CNT, CNTSCHID, CNTSTUID, OECD, ICTHOME, ICTSCH, GRADE, 
+         PAREDINT, WEALTH, ST004D01T, reading_score, math_score, science_score)
+
+# Check the dimensions of the loaded data
+dim(student_ten)
+dim(student_ten_subset)
+
+# Summary of the subsetted dataset
+#summary(student_ten_subset)
+#str(student_ten_subset)
+# Display the first few rows of the dataset
+# names(student_ten)
+```
+
+
+```{r data_scaling, echo=FALSE}
+## Data Scaling and Normalization
+# 1. Change all variable names to lower case
+setnames(student_ten_subset, tolower(names(student_ten_subset)))
+
+# 2. Change the variable class based on attributes
+
+# Convert CNTRYID and CNT to factors
+student_ten_subset$cntryid <- as.factor(student_ten_subset$cntryid)
+student_ten_subset$cnt <- as.factor(student_ten_subset$cnt)
+
+# Convert CNTSCHID and CNTSTUID to numeric
+student_ten_subset$cntschid <- as.numeric(student_ten_subset$cntschid)
+student_ten_subset$cntstuid <- as.numeric(student_ten_subset$cntstuid)
+
+# Convert OECD to factor using its labels
+student_ten_subset$oecd <- factor(student_ten_subset$oecd, levels = c(0, 1), labels = c("No", "Yes"))
+
+# Convert ICTHOME, ICTSCH to numeric (removing labels)
+student_ten_subset$icthome <- as.numeric(student_ten_subset$icthome)
+student_ten_subset$ictsch <- as.numeric(student_ten_subset$ictsch)
+
+# Convert GRADE to numeric (removing labels)
+student_ten_subset$grade <- as.numeric(student_ten_subset$grade)
+
+# Convert PAREDINT to numeric
+student_ten_subset$paredint <- as.numeric(student_ten_subset$paredint)
+
+# Convert WEALTH to numeric
+student_ten_subset$wealth <- as.numeric(student_ten_subset$wealth)
+
+# 3. Rename ST004D01T to student_gender and recode it
+student_ten_subset <- student_ten_subset %>%
+  mutate(student_gender = recode_factor(
+    as.factor(st004d01t),
+    `1` = "Female",
+    `2` = "Male",
+    `5` = "Valid Skip",
+    `7` = "Not Applicable",
+    `8` = "Invalid",
+    `9` = "No Response"
+  ))
+
+# Drop the old ST004D01T column
+student_ten_subset <- student_ten_subset %>% select(-st004d01t)
+
+# Check the structure of the modified data
+str(student_ten_subset)
+```
+
+## B. Variable Descriptions
+* **cntryid:** A categorical variable representing the country ID, where each unique value corresponds to a different country in the dataset.
+* **cnt:** A categorical variable representing the country code as a short identifier, such as "USA" for the United States.
+* **cntschid:** A numeric variable representing the unique international school ID, which identifies each school within a country.
+* **cntstuid:** A numeric variable representing the unique international student ID, which identifies each student within the dataset.
+* **oecd:** A categorical variable indicating whether the country is a member of the Organisation for Economic Co-operation and Development (OECD). It has two levels: "Yes" (OECD member) and "No" (non-OECD member).
+* **icthome:** A numeric variable representing the availability of Information and Communication Technology (ICT) at the student's home. Higher values indicate greater availability.
+* **ictsch:** A numeric variable representing the availability of Information and Communication Technology (ICT) at the student's school. Higher values indicate greater availability.
+* **grade:** A numeric variable indicating the student's grade level compared to the modal grade in their country. Negative values indicate below-modal grades, zero indicates the modal grade, and positive values indicate above-modal grades.
+* **paredint:** A numeric variable representing the highest level of parental education, measured in international years of schooling.
+* **wealth:** A numeric variable representing the family's wealth index, measured using a weighted likelihood estimate (WLE). Higher values indicate greater wealth.
+* **student_gender:** A categorical variable representing the student's gender, coded as "Female" or "Male". It also includes categories for cases like "Valid Skip", "Not Applicable", "Invalid", and "No Response".
+* **reading_score:** A numeric variable representing the student's weighted average score in reading, calculated from multiple plausible values.
+* **math_score:** A numeric variable representing the student's weighted average score in mathematics, calculated from multiple plausible values.
+* **science_score:** A numeric variable representing the student's weighted average score in science, calculated from multiple plausible values.
+
+## C. Missing Value Analysis
+```{r missing_values, echo=FALSE}
+# Check for missing values in the dataset
+missing_values <- student_ten_subset %>%
+  summarise_all(~sum(is.na(.))) %>%
+  gather(variable, missing_count)
+
+# Display the variables with missing values and corresponding percentages
+missing_values <- missing_values %>%
+  mutate(missing_percentage = missing_count / nrow(student_ten_subset) * 100) %>%
+  arrange(desc(missing_percentage))
+
+#missing_values
+
+# Melt the data for visualization
+melted_data <- melt(is.na(student_ten_subset))
+colnames(melted_data) <- c("Row", "Variable", "Missing")
+
+# Plot missing data
+missing_gg <- ggplot(data = melted_data, aes(x = Variable, fill = Missing)) +
+  geom_bar() +
+  coord_flip() +
+  labs(title = "Missing Data Pattern",
+       x = "Variables",
+       y = "Count of Missing Values") +
+  theme_minimal()
+
+# Using naniar package for missing data visualization
+gg_miss_var(student_ten_subset) +
+  labs(title = "Missing Data Pattern by Variable") +
+  theme_minimal()
+
+# Filter out countries with no data
+student_ten_filtered <- student_ten_subset %>%
+  group_by(cnt) %>%
+  filter(sum(!is.na(reading_score) | !is.na(math_score) | !is.na(science_score)) > 0) %>%
+  ungroup()
+
+# Dropping unused factor levels
+student_ten_filtered$cntryid <- droplevels(student_ten_filtered$cntryid)
+student_ten_filtered$cnt <- droplevels(student_ten_filtered$cnt)
+```
+
+The missing value analysis shows that the `ictsch` (ICT availability at school) and `icthome` (ICT availability at home) variables have substantial missing data, with 22.83% and 21.77% of values missing, respectively, which could significantly impact the reliability of analyses involving these variables. The `paredint` (highest parental education) variable has 4.17% missing data, while the `wealth` (family wealth index) variable has 2.44% missing, both of which are less concerning but still noteworthy. 
+
+## D. Descriptive Analyiss of Key Variables
+### i. Summary Statistics for Students' Reading Scores, Math Scores, Science Scores, Parental Education, and Wealth
+```{r summary_statistics, echo=FALSE}
+# Calculate extended summary statistics for each numeric variable by country
+reading_summary_stats <- student_ten_filtered %>%
+   summarise(
+    mean_reading = mean(reading_score, na.rm = TRUE),
+    median_reading = median(reading_score, na.rm = TRUE),
+    sd_reading = sd(reading_score, na.rm = TRUE),
+    min_reading = min(reading_score, na.rm = TRUE),
+    max_reading = max(reading_score, na.rm = TRUE),
+    skewness_reading = skew(reading_score, na.rm = TRUE),
+    kurtosis_reading = kurtosi(reading_score, na.rm = TRUE),
+
+    mean_math = mean(math_score, na.rm = TRUE),
+    median_math = median(math_score, na.rm = TRUE),
+    sd_math = sd(math_score, na.rm = TRUE),
+    min_math = min(math_score, na.rm = TRUE),
+    max_math = max(math_score, na.rm = TRUE),
+    skewness_math = skew(math_score, na.rm = TRUE),
+    kurtosis_math = kurtosi(math_score, na.rm = TRUE),
+
+    mean_science = mean(science_score, na.rm = TRUE),
+    median_science = median(science_score, na.rm = TRUE),
+    sd_science = sd(science_score, na.rm = TRUE),
+    min_science = min(science_score, na.rm = TRUE),
+    max_science = max(science_score, na.rm = TRUE),
+    skewness_science = skew(science_score, na.rm = TRUE),
+    kurtosis_science = kurtosi(science_score, na.rm = TRUE),
+
+    mean_paredint = mean(paredint, na.rm = TRUE),
+    median_paredint = median(paredint, na.rm = TRUE),
+    sd_paredint = sd(paredint, na.rm = TRUE),
+    min_paredint = min(paredint, na.rm = TRUE),
+    max_paredint = max(paredint, na.rm = TRUE),
+    skewness_paredint = skew(paredint, na.rm = TRUE),
+    kurtosis_paredint = kurtosi(paredint, na.rm = TRUE),
+
+    mean_wealth = mean(wealth, na.rm = TRUE),
+    median_wealth = median(wealth, na.rm = TRUE),
+    sd_wealth = sd(wealth, na.rm = TRUE),
+    min_wealth = min(wealth, na.rm = TRUE),
+    max_wealth = max(wealth, na.rm = TRUE),
+    skewness_wealth = skew(wealth, na.rm = TRUE),
+    kurtosis_wealth = kurtosi(wealth, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# Pivot the table to make it longer with variables as rows and statistics as columns
+reading_summary_stats_long <- reading_summary_stats %>%
+  pivot_longer(
+    cols = everything(),  # Pivot all columns
+    names_to = "Variable_Statistic",  # Combine the variable and statistic names into one column
+    values_to = "Value"  # The values go into the "Value" column
+  ) %>%
+  separate(Variable_Statistic, into = c("Statistic", "Variable"), sep = "_", extra = "merge") %>%
+  pivot_wider(
+    names_from = Statistic,  # Spread statistics (e.g., mean, median) across columns
+    values_from = Value  # Values from the pivoted column
+  )
+
+# Print the reshaped table
+print(reading_summary_stats_long)
+
+
+# Calculate summary statistics for each numeric variable by country
+country_summary_stats <- student_ten_filtered %>%
+  group_by(cnt) %>%
+  summarise(
+    mean_reading = mean(reading_score, na.rm = TRUE),
+    median_reading = median(reading_score, na.rm = TRUE),
+    sd_reading = sd(reading_score, na.rm = TRUE),
+    min_reading = min(reading_score, na.rm = TRUE),
+    max_reading = max(reading_score, na.rm = TRUE),
+    
+    mean_math = mean(math_score, na.rm = TRUE),
+    median_math = median(math_score, na.rm = TRUE),
+    sd_math = sd(math_score, na.rm = TRUE),
+    min_math = min(math_score, na.rm = TRUE),
+    max_math = max(math_score, na.rm = TRUE),
+    
+    mean_science = mean(science_score, na.rm = TRUE),
+    median_science = median(science_score, na.rm = TRUE),
+    sd_science = sd(science_score, na.rm = TRUE),
+    min_science = min(science_score, na.rm = TRUE),
+    max_science = max(science_score, na.rm = TRUE),
+    
+    mean_paredint = mean(paredint, na.rm = TRUE),
+    median_paredint = median(paredint, na.rm = TRUE),
+    sd_paredint = sd(paredint, na.rm = TRUE),
+    min_paredint = min(paredint, na.rm = TRUE),
+    max_paredint = max(paredint, na.rm = TRUE),
+    
+    mean_wealth = mean(wealth, na.rm = TRUE),
+    median_wealth = median(wealth, na.rm = TRUE),
+    sd_wealth = sd(wealth, na.rm = TRUE),
+    min_wealth = min(wealth, na.rm = TRUE),
+    max_wealth = max(wealth, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# Pivot the table to make it longer with variable as rows and statistics as columns
+country_summary_stats_long <- country_summary_stats %>%
+  pivot_longer(
+    cols = -cnt,  # Pivot all columns except 'cnt'
+    names_to = "Variable_Statistic",
+    values_to = "Value"
+  ) %>%
+  separate(Variable_Statistic, into = c("Statistic", "Variable"), sep = "_") %>%
+  pivot_wider(
+    names_from = Statistic,
+    values_from = Value
+  )
+
+# Print the reshaped table
+print(country_summary_stats_long, n = 60)
+```
+
+### ii. Distribution of Students by Country, Country Code, OECD Membership
+```{r categorical_distribution, echo=FALSE}
+# Create the summary table
+country_summary <- student_ten_filtered %>%
+  group_by(cntryid, cnt) %>%
+  summarise(Observations = n()) %>%
+  ungroup()
+
+# Print the summary table
+print(country_summary)
+
+# Print the number of unique countries
+unique_countries <- nrow(country_summary)
+print(paste("Number of unique countries:", unique_countries))
+
+oecd_counts <- table(student_ten_filtered$oecd)
+# Generate the message using paste
+message <- paste("The OECD variable shows that there are",
+                 oecd_counts["No"], "observations from non-OECD countries and",
+                 oecd_counts["Yes"], "from OECD countries.")
+
+# Print the message
+print(message)
+
+# Calculate the counts for gender
+gender_counts <- table(student_ten_filtered$student_gender)
+
+# Generate the message using paste
+gender_message <- paste("The dataset includes",
+                        gender_counts["Female"], "female students and",
+                        gender_counts["Male"], "male students.")
+
+# Print the message
+print(gender_message)
+```
+
+### iii. Cross-tabulation of Variables
+```{r cross_tabulation, echo=FALSE}
+# Cross-tabulation between country and student_gender
+table(student_ten_filtered$cnt, student_ten_filtered$student_gender)
+```
+
+### iv. Average Scores by Subjects for Top 6 and Bottom 4 Countries
+```{r top_bottom_countries, echo=FALSE}
+# Create a new column to label top and bottom countries
+student_ten_filtered <- student_ten_filtered %>%
+  mutate(Group = ifelse(cnt %in% c("HKG", "KOR", "TAP", "MAC", "GBR", "USA"), "Top", "Bottom"))
+
+# Calculate the mean scores for reading, math, and science by group
+group_summary <- student_ten_filtered %>%
+  group_by(Group) %>%
+  summarise(
+    mean_reading = mean(reading_score, na.rm = TRUE),
+    mean_math = mean(math_score, na.rm = TRUE),
+    mean_science = mean(science_score, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# Reshape the data for plotting
+group_summary_long <- group_summary %>%
+  pivot_longer(
+    cols = -Group,
+    names_to = "Subject",
+    values_to = "Mean_Score"
+  ) %>%
+  mutate(Subject = recode(Subject, 
+                          mean_reading = "Reading", 
+                          mean_math = "Math", 
+                          mean_science = "Science"))
+
+# Plot the mean scores by group
+score_group <- ggplot(group_summary_long, aes(x = Subject, y = Mean_Score, fill = Group)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Mean Scores by Subject for Top and Bottom Countries",
+       x = "Subject",
+       y = "Mean Score") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Top" = "blue", "Bottom" = "red"))
+
+score_group
+
+# Save the plot as a JPEG file
+ggsave("score_group.jpeg", plot = score_group, 
+       width = 10, height = 8, dpi = 600)
+```
+
+### v. Calculate Mean Scores by Group and Gender
+```{r mean_scores_gender_group, echo=FALSE}
+# Calculate the mean scores for reading, math, and science by group and gender
+group_gender_summary <- student_ten_filtered %>%
+  group_by(Group, student_gender) %>%
+  summarise(
+    mean_reading = mean(reading_score, na.rm = TRUE),
+    mean_math = mean(math_score, na.rm = TRUE),
+    mean_science = mean(science_score, na.rm = TRUE)
+  ) %>%
+  ungroup()
+```
+
+
+```{r reshape_data, echo=FALSE} 
+# Reshape the data for plotting
+group_gender_summary_long <- group_gender_summary %>%
+  pivot_longer(
+    cols = starts_with("mean_"),
+    names_to = "Subject",
+    values_to = "Mean_Score"
+  ) %>%
+  mutate(Subject = recode(Subject, 
+                          mean_reading = "Reading", 
+                          mean_math = "Math", 
+                          mean_science = "Science"))
+```
+
+
+```{r plot_results, echo=FALSE}
+# Plot the mean scores by group, gender, and subject
+score_group_gender <- ggplot(group_gender_summary_long, aes(x = Subject, y = Mean_Score, fill = Group)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~student_gender) +
+  labs(title = "Mean Scores by Subject, Gender, and Group (Top/Bottom Countries)",
+       x = "Subject",
+       y = "Mean Score") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Top" = "blue", "Bottom" = "red")) +
+  theme(legend.position = "top")
+
+score_group_gender
+
+# Save the plot as a JPEG file
+ggsave("score_group_gender.jpeg", plot = score_group_gender, 
+       width = 10, height = 8, dpi = 600)
+```
+
+### vi. Calcualte Mean Scores by Group, Gender, and Wealth (Quartiles)
+```{r scores_group_gender_wealth, echo=FALSE}
+# Categorize wealth into quartiles
+student_ten_filtered <- student_ten_filtered %>%
+  group_by(Group) %>%
+  mutate(wealth_quartile = ntile(wealth, 4)) %>%
+  ungroup()
+
+# Calculate the mean scores for reading, math, and science by group, gender, and wealth quartile
+group_gender_wealth_summary <- student_ten_filtered %>%
+  group_by(Group, student_gender, wealth_quartile) %>%
+  summarise(
+    mean_reading = mean(reading_score, na.rm = TRUE),
+    mean_math = mean(math_score, na.rm = TRUE),
+    mean_science = mean(science_score, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# Reshape the data for plotting
+group_gender_wealth_summary_long <- group_gender_wealth_summary %>%
+  pivot_longer(
+    cols = starts_with("mean_"),
+    names_to = "Subject",
+    values_to = "Mean_Score"
+  ) %>%
+  mutate(Subject = recode(Subject, 
+                          mean_reading = "Reading", 
+                          mean_math = "Math", 
+                          mean_science = "Science"))
+
+# Plot the mean scores by group, gender, wealth quartile, and subject
+scores_group_gender_wealth<- ggplot(group_gender_wealth_summary_long, aes(x = wealth_quartile, y = Mean_Score, fill = Group)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(student_gender ~ Subject) +
+  labs(title = "Mean Scores by Subject, Gender, Wealth Quartile, and Group (Top/Bottom Countries)",
+       x = "Wealth Quartile",
+       y = "Mean Score",
+       fill = "Group") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Top" = "blue", "Bottom" = "red")) +
+  theme(legend.position = "top")
+
+scores_group_gender_wealth
+
+# Save the plot as a JPEG file
+ggsave("scores_group_gender_wealth.jpeg", plot = scores_group_gender_wealth, 
+       width = 10, height = 8, dpi = 600)
+```
+
+### vii. Scores by Group, Gender, and Parental Education
+```{r scores_group_gender_paredint, echo=FALSE}
+# Handle missing values by filtering them out (if necessary)
+student_ten_filtered <- student_ten_filtered %>%
+  filter(!is.na(paredint))
+
+# Categorize parental education index into quartiles
+student_ten_filtered <- student_ten_filtered %>%
+  group_by(Group) %>%
+  mutate(paredint_quartile = ntile(paredint, 4)) %>%
+  ungroup()
+
+# Calculate the mean scores for reading, math, and science by group, gender, and parental education quartile
+group_gender_paredint_summary <- student_ten_filtered %>%
+  group_by(Group, student_gender, paredint_quartile) %>%
+  summarise(
+    mean_reading = mean(reading_score, na.rm = TRUE),
+    mean_math = mean(math_score, na.rm = TRUE),
+    mean_science = mean(science_score, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# Reshape the data for plotting
+group_gender_paredint_summary_long <- group_gender_paredint_summary %>%
+  pivot_longer(
+    cols = starts_with("mean_"),
+    names_to = "Subject",
+    values_to = "Mean_Score"
+  ) %>%
+  mutate(Subject = recode(Subject, 
+                          mean_reading = "Reading", 
+                          mean_math = "Math", 
+                          mean_science = "Science"))
+
+# Plot the mean scores by group, gender, parental education quartile, and subject
+scores_group_gender_paredint <- ggplot(group_gender_paredint_summary_long, aes(x = paredint_quartile, y = Mean_Score, fill = Group)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(student_gender ~ Subject) +
+  labs(title = "Mean Scores by Subject, Gender, Parental Education Quartile, and Group (Top/Bottom Countries)",
+       x = "Parental Education Quartile",
+       y = "Mean Score",
+       fill = "Group") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Top" = "blue", "Bottom" = "red")) +
+  theme(legend.position = "top")
+
+scores_group_gender_paredint
+
+# Save the plot as a JPEG file
+ggsave("scores_group_gender_paredint.jpeg", plot = scores_group_gender_paredint, 
+       width = 10, height = 8, dpi = 600)
+```
